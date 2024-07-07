@@ -1,44 +1,110 @@
-module "vpc" {
-  source = "../Modules/Terraform-VPC"
+# Creating VPC with some other configures and the CIDR block will be provided by the variables.tf file and the CIDR block is 10.0.0.0/16
+resource "aws_vpc" "vpc" {
+  count = "${var.is_vpc_enable == 1 ? var.vpc_count : 0 }"
+  cidr_block           = var.cidr_block
+  instance_tenancy     = var.tenancy
+  enable_dns_hostnames = var.dns_hostname
 
-  is_vpc_enable = var.is_enable_vpc
-  vpc_count     = 1
-  cidr_block    = var.cidr_block_vpc
-  tenancy       = var.instance_tenancy_vpc
-  dns_hostname  = var.dns
-  vpc_name      = var.name_vpc
+  tags = {
+    Name = var.vpc_name
+  }
+}
 
-  is_gateway_enable     = var.is_enable_ig
-  gateway_count         = 1
-  internet_gateway_name = var.gateway_name
+# Creating Internet Gateway and attached to the Created VPC by vpc_id
+resource "aws_internet_gateway" "gateway" {
+  count = "${var.is_vpc_enable == 1 && var.is_gateway_enable == 1 ? var.gateway_count : 0 }"
+  vpc_id = aws_vpc.vpc[count.index].id
 
-  is_public_subnet_enable = var.is_subnet_enable_public
-  public_subnet_count     = 1
-  subnet_cidr1            = var.public_cidr
-  zone1                   = var.az1
-  public_ip               = var.map_public_ip
-  subnet_name1            = var.public_subnet
+  tags = {
+    Name = var.internet_gateway_name
+  }
+}
 
-  is_private_subnet_enable = var.is_subnet_enable_private
-  private_subnet_count     = 1
-  subnet_cidr2             = var.private_cidr
-  zone2                    = var.az2
-  private_ip               = var.map_private_ip
-  subnet_name2             = var.private_subnet
 
-  is_rt_enable     = var.is_enable_rt
-  rt_count         = 1
-  public_route     = var.route_public
-  route_table_name = var.rt_name
+# Creating Public Subnet and attached to the Created VPC in the availability zone us-east-1a and map_public_ip is true 
+# which means that the Subnet assigned as Public IP Address, by default it is false
 
-  is_rta_enable = var.is_enable_rta
-  rta_count     = 1
+resource "aws_subnet" "public-subnet-1" {
+  count = "${var.is_vpc_enable == 1 && var.is_public_subnet_enable == 1 ? var.public_subnet_count : 0 }"
+  vpc_id                  = aws_vpc.vpc[count.index].id
+  cidr_block              = var.subnet_cidr1
+  availability_zone       = var.zone1
+  map_public_ip_on_launch = var.public_ip
 
-  is_aws_security_group_enable = var.is_sg_enable
-  security_group_count         = 1
-  from_port1                   = var.from_port1
-  to_port1                     = var.to_port1
-  from_port2                   = var.from_port2
-  to_port2                     = var.to_port2
-  security_group_name          = var.sg_name
+  tags = {
+    Name = var.subnet_name1
+  }
+}
+
+
+# Creating Private Subnet and attached to Created VPC then, the other configurations are provided 
+# such as availability zone will be us-east-1a and map_public_ip will be true which considered subnet as Private IP
+
+resource "aws_subnet" "private-subnet-1" {
+  count = "${var.is_vpc_enable == 1 && var.is_private_subnet_enable == 1 ? var.private_subnet_count : 0 }"
+  vpc_id                  = aws_vpc.vpc[count.index].id
+  cidr_block              = var.subnet_cidr2
+  availability_zone       = var.zone2
+  map_public_ip_on_launch = var.private_ip
+
+  tags = {
+    Name = var.subnet_name2
+  }
+}
+
+
+# Creating Route by attached to the Created VPC and add Public route 
+
+
+resource "aws_route_table" "route_table" {
+  count = "${var.is_vpc_enable == 1 && var.is_gateway_enable == 1 && var.is_rt_enable == 1 ? var.rt_count : 0 }"
+
+  vpc_id = aws_vpc.vpc[count.index].id
+  route {
+    cidr_block = var.public_route
+    gateway_id = aws_internet_gateway.gateway[count.index].id
+  }
+
+  tags = {
+    Name = var.route_table_name
+  }
+}
+
+
+
+
+resource "aws_route_table_association" "route-table-association1" {
+  count = "${var.is_vpc_enable == 1 && var.is_public_subnet_enable == 1 && var.is_rt_enable == 1 && var.is_rta_enable == 1 ? var.rta_count : 0 }"
+  subnet_id      = aws_subnet.public-subnet-1[count.index].id
+  route_table_id = aws_route_table.route_table[count.index].id
+}
+
+resource "aws_security_group" "security_group" {
+  count = "${var.is_vpc_enable == 1 && var.is_aws_security_group_enable == 1 ? var.security_group_count : 0 }"
+
+  vpc_id = aws_vpc.vpc[count.index].id
+  ingress {
+    from_port = var.from_port1
+    to_port = var.to_port1
+    protocol = "tcp"
+    cidr_blocks = [var.public_route]
+  }
+
+  ingress {
+    from_port = var.from_port2
+    to_port = var.to_port2
+    protocol = "tcp"
+    cidr_blocks = [var.public_route]
+  }
+
+  egress {
+    from_port = 0
+    to_port = 0   
+    protocol = "-1"
+    cidr_blocks = [var.public_route]
+  }
+
+  tags = {
+    Name = var.security_group_name
+  }
 }
